@@ -1,0 +1,7 @@
+startServices: "dynamodb,s3"
+
+debug: true
+
+extraEnvVars:
+- name: FORCE_NONINTERACTIVE
+  value: "1"

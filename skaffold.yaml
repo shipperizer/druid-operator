@@ -1,0 +1,38 @@
+apiVersion: skaffold/v2beta26
+kind: Config
+deploy:
+  kubectl:
+    manifests:
+    - custom/druid.yaml
+profiles:
+- name: druid-operator
+  deploy:
+    kubectl:
+      manifests:
+      - deploy/service_account.yaml
+      - deploy/role.yaml
+      - deploy/role_binding.yaml
+      - deploy/crds/druid.apache.org_druids.yaml
+      - deploy/operator.yaml
+- name: localstack
+  patches:
+  - op: remove
+    path: /deploy/kubectl
+  deploy:
+    helm:
+      releases:
+      - name: localstack
+        remoteChart: localstack-charts/localstack
+        valuesFiles:
+        - custom/localstack/localstack.yaml
+        upgradeOnChange: true
+- name: zookeeper
+  patches:
+  - op: remove
+    path: /deploy/kubectl
+  deploy:
+    helm:
+      releases:
+      - name: zookeeper
+        remoteChart: bitnami/zookeeper
+        upgradeOnChange: true
