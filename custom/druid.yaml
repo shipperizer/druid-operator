@@ -6,10 +6,11 @@ kind: "Druid"
 metadata:
   name: test
 spec:
-  image: apache/druid:0.22.0
+  # image: apache/druid:0.22.0
+  image: ghcr.io/shipperizer/druid:b8037b0
   # Optionally specify image for all nodes. Can be specify on nodes also
-  # imagePullSecrets:
-  # - name: tutu
+  imagePullSecrets:
+  - name: regcred-github
   startScript: /druid.sh
   podLabels:
     environment: stage
@@ -22,9 +23,9 @@ spec:
       port: 8088
   # overridden to use 0 instead of 1000
   securityContext:
-    fsGroup: 0
-    runAsUser: 0
-    runAsGroup: 0
+    fsGroup: 1000
+    runAsUser: 1000
+    runAsGroup: 1000
   services:
     - spec:
         type: ClusterIP
@@ -49,7 +50,7 @@ spec:
             </Console>
         </Appenders>
         <Loggers>
-            <Root level="debug">
+            <Root level="info">
                 <AppenderRef ref="Console"/>
             </Root>
         </Loggers>
@@ -57,7 +58,7 @@ spec:
   common.runtime.properties: |
 
     # Zookeeper
-    druid.zk.service.host=zookeeper
+    druid.zk.service.host=zookeeper.default.svc.cluster.local
     druid.zk.paths.base=/druid
     druid.zk.service.compress=false
     # "druid–kubernetes-extensions" properties overrides above
@@ -90,7 +91,11 @@ spec:
     #
     # Extensions
     #
-    druid.extensions.loadList=["druid-kafka-indexing-service", "druid-s3-extensions", "druid-kinesis-indexing-service"] #, "druid-example-extension", "druid–kubernetes-extensions", "prometheus-emitter"] 
+    # druid.extensions.useExtensionClassloaderFirst=true
+    # druid.extensions.searchCurrentClassloader=false 
+    # load so extensions may depend on conflicting versions.
+    druid.extensions.directory=/opt/druid/extensions/
+    druid.extensions.loadList=["druid-kafka-indexing-service", "druid-s3-extensions", "druid-kinesis-indexing-service", "druid–kubernetes-extensions", "prometheus-emitter"] 
 
     # Emitters
     druid.emitter=composing
@@ -342,7 +347,9 @@ spec:
         druid.coordinator.asOverlord.enabled=true
         druid.coordinator.asOverlord.overlordService=druid/overlord
         druid.indexer.queue.startDelay=PT30S
-        druid.indexer.runner.type=local
+        # druid.indexer.runner.type=local
+        druid.indexer.runner.type=remote
+        druid.indexer.storage.type=metadata
       extra.jvm.options: |-
         -Xmx512M
         -Xms512M
@@ -389,3 +396,124 @@ spec:
       extra.jvm.options: |-
         -Xmx512M
         -Xms512M
+
+    middlemanagers:
+      kind: Deployment
+      druid.port: 8088
+      extra.jvm.options: |-
+          -Xmx4G
+          -Xms4G
+      nodeType: "middleManager"
+      nodeConfigMountPath: /opt/druid/conf/druid/cluster/data/middleManager
+      log4j.config: |-
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <Configuration status="WARN">
+            <Appenders>
+                <Console name="Console" target="SYSTEM_OUT">
+                    <PatternLayout pattern="%d{ISO8601} %p [%t] %c - %m%n"/>
+                </Console>
+            </Appenders>
+            <Loggers>
+                <Root level="debug">
+                    <AppenderRef ref="Console"/>
+                </Root>
+            </Loggers>
+        </Configuration>
+      ports:
+      - containerPort: 8100
+        name: peon-0
+      - containerPort: 8101
+        name: peon-1
+      - containerPort: 8102
+        name: peon-2
+      - containerPort: 8103
+        name: peon-3
+      - containerPort: 8104
+        name: peon-4
+      - containerPort: 8105
+        name: peon-5
+      - containerPort: 8106
+        name: peon-6
+      - containerPort: 8107
+        name: peon-7
+      - containerPort: 8108
+        name: peon-8
+      - containerPort: 8109
+        name: peon-9
+      replicas: 1
+      resources:
+        limits:
+          cpu: "2"
+          memory: 5Gi
+        requests:
+          cpu: "2"
+          memory: 5Gi
+      livenessProbe:
+          initialDelaySeconds: 30
+          httpGet:
+            path: /status/health
+            port: 8088
+      readinessProbe:
+          initialDelaySeconds: 30
+          httpGet:
+            path: /status/health
+            port: 8088
+      runtime.properties: |-
+          druid.service=druid/middleManager
+          druid.worker.capacity=1
+          druid.indexer.task.baseTaskDir=/druid/data/baseTaskDir
+          druid.server.http.numThreads=10
+          # Processing threads and buffers on Peons
+          druid.indexer.runner.javaOpts=-server -XX:MaxDirectMemorySize=10240g -Duser.timezone=UTC -Dfile.encoding=UTF-8 -Djava.io.tmpdir=/opt/druid/var/tmp/ -Dlog4j.debug -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationStoppedTime -XX:+PrintGCApplicationConcurrentTime -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=50 -XX:GCLogFileSize=10m -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:+UseG1GC -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager -Xloggc:/druid/data/logs/peon.gc.%t.%p.log -XX:HeapDumpPath=/druid/data/logs/peon.%t.%p.hprof -Xms1G -Xmx1G
+          druid.indexer.fork.property.druid.processing.numThreads=1
+          druid.indexer.fork.property.druid.processing.buffer.sizeBytes=268435456
+          druid.indexer.fork.property.druid.processing.numMergeBuffers=1
+      services:
+      - spec:
+          clusterIP: None
+          ports:
+          - name: tcp-service-port
+            port: 8091
+            targetPort: 8091
+          type: ClusterIP
+      volumes:
+      - name: tmp-volume
+        emptyDir: {}    
+      volumeClaimTemplates:
+      - metadata:
+          name: data-mdmgr-volume
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi
+      #     # storageClassName: zone-a-storage
+      volumeMounts:
+      - mountPath: /opt/druid/var/druid/
+        name: data-volume
+      - mountPath: /opt/druid/var/tmp/
+        name: tmp-volume
+      containerSecurityContext:
+        capabilities:
+          drop:
+          - "ALL"
+      securityContext:
+        fsGroup: 1001
+        runAsUser: 1001
+        runAsGroup: 1001
+      terminationGracePeriodSeconds: 100
+      hpAutoscaler:
+        maxReplicas: 10
+        minReplicas: 1
+        scaleTargetRef:
+          apiVersion: apps/v1
+          kind: Deployment
+          name: druid-test-middlemanagers
+        metrics:
+        - type: Resource
+          resource:
+            name: cpu
+            target:
+              type: Utilization
+              averageUtilization: 50
