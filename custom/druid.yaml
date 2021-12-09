@@ -6,11 +6,11 @@ kind: "Druid"
 metadata:
   name: test
 spec:
-  # image: apache/druid:0.22.0
-  image: ghcr.io/shipperizer/druid:b8037b0
+  image: apache/druid:0.22.0
+  # image: ghcr.io/shipperizer/druid:b8037b0
   # Optionally specify image for all nodes. Can be specify on nodes also
-  imagePullSecrets:
-  - name: regcred-github
+  # imagePullSecrets:
+  # - name: regcred-github
   startScript: /druid.sh
   podLabels:
     environment: stage
@@ -21,7 +21,6 @@ spec:
     httpGet:
       path: /status/health
       port: 8088
-  # overridden to use 0 instead of 1000
   securityContext:
     fsGroup: 1000
     runAsUser: 1000
@@ -39,8 +38,7 @@ spec:
     -Dlog4j.debug
     -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager
     -Djava.io.tmpdir=/druid/data
-    -Daws.region=eu-west-1 
-  # see AWS_REGION setup above
+    -Daws.region=eu-west-1
   log4j.config: |-
     <?xml version="1.0" encoding="UTF-8" ?>
     <Configuration status="WARN">
@@ -50,43 +48,87 @@ spec:
             </Console>
         </Appenders>
         <Loggers>
-            <Root level="info">
+            <Root level="error">
                 <AppenderRef ref="Console"/>
             </Root>
         </Loggers>
     </Configuration>
+  volumeMounts:
+  - mountPath: /druid/data
+    name: data-volume
+  - mountPath: /druid/deepstorage
+    name: deepstorage-volume
+  volumes:
+  - name: data-volume
+    emptyDir: {}
+  - name: deepstorage-volume
+    hostPath:
+      path: /tmp/druid/deepstorage
+      type: DirectoryOrCreate  
+  env:
+  - name: POD_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.name
+  - name: POD_NAMESPACE
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.namespace
+  - name: AWS_REGION
+    value: "eu-west-1"      
   common.runtime.properties: |
 
+    # log properties
+    druid.startup.logging.logProperties=true
+
+    #
     # Zookeeper
-    druid.zk.service.host=zookeeper.default.svc.cluster.local
-    druid.zk.paths.base=/druid
-    druid.zk.service.compress=false
-    # "druid–kubernetes-extensions" properties overrides above
-    # druid.zk.service.enabled=false
-    # druid.serverview.type=http
-    # druid.coordinator.loadqueuepeon.type=http
-    # druid.indexer.runner.type=httpRemote 
-    # druid.discovery.type=k8s
+    #
+    # druid.zk.service.host=zookeeper.default.svc.cluster.local
+    # druid.zk.paths.base=/druid
+    # druid.zk.service.compress=false
+    druid.zk.service.enabled=false
+    druid.serverview.type=http
+    druid.coordinator.loadqueuepeon.type=http
+    druid.indexer.runner.type=httpRemote
+    druid.discovery.type=k8s
+    druid.discovery.k8s.clusterIdentifier=minikube
+
+    #
+    # Deep Storage
+    #
+    druid.storage.bucket=druid
+    druid.storage.baseKey=druid/segments
+    druid.storage.type=s3
+    druid.storage.archiveBucket=
+    druid.storage.archiveBaseKey=
+    druid.storage.disableAcl=false
+    druid.storage.useS3aSchema=false    
+    druid.s3.accessKey=0
+    druid.s3.secretKey=0
+    druid.s3.protocol=http
+    druid.s3.endpoint.url=http://localstack.default.svc.cluster.local:4566
+    druid.s3.enablePathStyleAccess="true"
+    druid.storage.sse.type=
     
-    
-    # Metadata Store
+    #
+    # Metadata
+    #
     druid.metadata.storage.type=derby
     druid.metadata.storage.connector.connectURI=jdbc:derby://localhost:1527/druid/data/derbydb/metadata.db;create=true
     druid.metadata.storage.connector.host=localhost
     druid.metadata.storage.connector.port=1527
     druid.metadata.storage.connector.createTables=true
-
-    # Deep Storage
-    # druid.storage.type=local
-    # druid.storage.storageDirectory=/druid/deepstorage
-
-    druid.storage.bucket=druid
-    druid.storage.baseKey=drd
-    druid.storage.type=s3
-    druid.storage.archiveBucket=
-    druid.storage.archiveBaseKey=
-    druid.storage.disableAcl=false
-    druid.storage.useS3aSchema=false
+    # druid.metadata.storage.type=postgresql
+    # druid.metadata.storage.connector.connectURI=jdbc:postgresql://rdsaddr.us-west-2.rds.amazonaws.com:5432/druiddb
+    # druid.metadata.storage.connector.user=iamuser
+    # druid.metadata.storage.connector.password=changeme
+    
+    # 
+    # Emitters
+    # 
+    # druid.emitter=composing
+    # druid.emitter.prometheus.strategy=yes
 
     #
     # Extensions
@@ -94,31 +136,18 @@ spec:
     # druid.extensions.useExtensionClassloaderFirst=true
     # druid.extensions.searchCurrentClassloader=false 
     # load so extensions may depend on conflicting versions.
-    druid.extensions.directory=/opt/druid/extensions/
-    druid.extensions.loadList=["druid-kafka-indexing-service", "druid-s3-extensions", "druid-kinesis-indexing-service", "druid–kubernetes-extensions", "prometheus-emitter"] 
-
-    # Emitters
-    druid.emitter=composing
-    druid.emitter.prometheus.strategy=yes
-
-    # S3
-    aws.region=eu-west-1
-    druid.s3.accessKey=0
-    druid.s3.secretKey=0
-    druid.s3.protocol=http
-    druid.s3.endpoint.url=http://localstack.default.svc.cluster.local:4566
-    druid.s3.enablePathStyleAccess=true
+    # druid.extensions.directory=/opt/druid/extensions/
+    # druid.extensions.loadList=["druid-kafka-indexing-service", "druid-s3-extensions", "druid-kinesis-indexing-service", "druid–kubernetes-extensions", "prometheus-emitter"] 
+    druid.extensions.loadList=["druid-kafka-indexing-service","druid-s3-extensions","druid-kubernetes-extensions"]
 
     #
     # Service discovery
     #
     druid.selectors.indexing.serviceName=druid/overlord
     druid.selectors.coordinator.serviceName=druid/coordinator
-
+    druid.lookup.enableLookupSyncOnStartup=false
     druid.indexer.logs.type=file
     druid.indexer.logs.directory=/druid/data/indexing-logs
-    druid.lookup.enableLookupSyncOnStartup=false
-
   metricDimensions.json: |-
     {
       "query/time" : { "dimensions" : ["dataSource", "type"], "type" : "timer"},
@@ -281,29 +310,6 @@ spec:
         "[MEM] Response Rate: Success"],
         "type" : "count" }
     }
-
-  volumeMounts:
-    - mountPath: /druid/data
-      name: data-volume
-    - mountPath: /druid/deepstorage
-      name: deepstorage-volume
-  volumes:
-    - name: data-volume
-      emptyDir: {}
-    - name: deepstorage-volume
-      hostPath:
-        path: /tmp/druid/deepstorage
-        type: DirectoryOrCreate
-  env:
-    - name: POD_NAME
-      valueFrom:
-        fieldRef:
-          fieldPath: metadata.name
-    - name: POD_NAMESPACE
-      valueFrom:
-        fieldRef:
-          fieldPath: metadata.namespace
-
   nodes:
     brokers:
       # Optionally specify for running broker as Deployment
@@ -321,14 +327,13 @@ spec:
         druid.broker.http.numConnections=5
         druid.server.http.numThreads=10
         # Processing threads and buffers
-        druid.processing.buffer.sizeBytes=1
+        druid.processing.buffer.sizeBytes=128MiB
         druid.processing.numMergeBuffers=1
-        druid.processing.numThreads=1
+        druid.processing.numThreads=5
         druid.sql.enable=true
       extra.jvm.options: |-
-        -Xmx512M
+        -Xmx2G
         -Xms512M
-
     coordinators:
       # Optionally specify for running coordinator as Deployment
       kind: Deployment
@@ -338,41 +343,46 @@ spec:
       replicas: 1
       runtime.properties: |
         druid.service=druid/coordinator
-
         # HTTP server threads
         druid.coordinator.startDelay=PT30S
         druid.coordinator.period=PT30S
-
         # Configure this coordinator to also run as Overlord
         druid.coordinator.asOverlord.enabled=true
         druid.coordinator.asOverlord.overlordService=druid/overlord
         druid.indexer.queue.startDelay=PT30S
-        # druid.indexer.runner.type=local
-        druid.indexer.runner.type=remote
-        druid.indexer.storage.type=metadata
       extra.jvm.options: |-
-        -Xmx512M
+        -Xmx2G
         -Xms512M
-
     historicals:
       nodeType: "historical"
       druid.port: 8088
       nodeConfigMountPath: "/opt/druid/conf/druid/cluster/data/historical"
       replicas: 1
+      volumeClaimTemplates:
+      - metadata:
+          name: historical-volume
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi
+      volumeMounts:
+        - mountPath: var/druid
+          name: historical-volume
       runtime.properties: |
         druid.service=druid/historical
         druid.server.http.numThreads=5
-        druid.processing.buffer.sizeBytes=536870912
+        druid.processing.buffer.sizeBytes=512MiB
         druid.processing.numMergeBuffers=1
-        druid.processing.numThreads=1
+        druid.processing.numThreads=5
 
         # Segment storage
-        druid.segmentCache.locations=[{\"path\":\"/druid/data/segments\",\"maxSize\":10737418240}]
+        druid.segmentCache.locations=[{"path":"var/druid/segments","maxSize":10737418240}]
         druid.server.maxSize=10737418240
       extra.jvm.options: |-
-        -Xmx512M
+        -Xmx2G
         -Xms512M
-          
     routers:
       nodeType: "router"
       druid.port: 8088
@@ -394,15 +404,14 @@ spec:
         # Management proxy to coordinator / overlord: required for unified web console.
         druid.router.managementProxy.enabled=true       
       extra.jvm.options: |-
-        -Xmx512M
+        -Xmx2G
         -Xms512M
-
     middlemanagers:
       kind: Deployment
       druid.port: 8088
       extra.jvm.options: |-
-          -Xmx4G
-          -Xms4G
+          -Xmx2G
+          -Xms512M
       nodeType: "middleManager"
       nodeConfigMountPath: /opt/druid/conf/druid/cluster/data/middleManager
       log4j.config: |-
@@ -414,7 +423,7 @@ spec:
                 </Console>
             </Appenders>
             <Loggers>
-                <Root level="debug">
+                <Root level="info">
                     <AppenderRef ref="Console"/>
                 </Root>
             </Loggers>
@@ -459,15 +468,15 @@ spec:
             path: /status/health
             port: 8088
       runtime.properties: |-
-          druid.service=druid/middleManager
-          druid.worker.capacity=1
-          druid.indexer.task.baseTaskDir=/druid/data/baseTaskDir
-          druid.server.http.numThreads=10
-          # Processing threads and buffers on Peons
-          druid.indexer.runner.javaOpts=-server -XX:MaxDirectMemorySize=10240g -Duser.timezone=UTC -Dfile.encoding=UTF-8 -Djava.io.tmpdir=/opt/druid/var/tmp/ -Dlog4j.debug -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationStoppedTime -XX:+PrintGCApplicationConcurrentTime -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=50 -XX:GCLogFileSize=10m -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:+UseG1GC -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager -Xloggc:/druid/data/logs/peon.gc.%t.%p.log -XX:HeapDumpPath=/druid/data/logs/peon.%t.%p.hprof -Xms1G -Xmx1G
-          druid.indexer.fork.property.druid.processing.numThreads=1
-          druid.indexer.fork.property.druid.processing.buffer.sizeBytes=268435456
-          druid.indexer.fork.property.druid.processing.numMergeBuffers=1
+        druid.service=druid/middleManager
+        druid.worker.capacity=4
+        druid.indexer.task.baseTaskDir=/druid/data/baseTaskDir
+        druid.server.http.numThreads=10
+        # Processing threads and buffers on Peons
+        druid.indexer.runner.javaOpts=-server -XX:MaxDirectMemorySize=10240g -Djava.io.tmpdir=/opt/druid/var/tmp -Daws.region=eu-west-1 -Duser.timezone=UTC -Dfile.encoding=UTF-8 -Dlog4j.debug -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationStoppedTime -XX:+PrintGCApplicationConcurrentTime -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=50 -XX:GCLogFileSize=10m -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:+UseG1GC -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager -Xloggc:/druid/data/logs/peon.gc.%t.%p.log -XX:HeapDumpPath=/druid/data/logs/peon.%t.%p.hprof -Xms512M -Xmx2G
+        druid.indexer.fork.property.druid.processing.numThreads=1
+        druid.indexer.fork.property.druid.processing.buffer.sizeBytes=256MiB
+        druid.indexer.fork.property.druid.processing.numMergeBuffers=1
       services:
       - spec:
           clusterIP: None
@@ -481,14 +490,13 @@ spec:
         emptyDir: {}    
       volumeClaimTemplates:
       - metadata:
-          name: data-mdmgr-volume
+          name: data-volume
         spec:
           accessModes:
           - ReadWriteOnce
           resources:
             requests:
               storage: 20Gi
-      #     # storageClassName: zone-a-storage
       volumeMounts:
       - mountPath: /opt/druid/var/druid/
         name: data-volume
@@ -517,3 +525,9 @@ spec:
             target:
               type: Utilization
               averageUtilization: 50
+        - type: Resource
+          resource:
+            name: memory
+            target:
+              type: Utilization
+              averageUtilization: 70
