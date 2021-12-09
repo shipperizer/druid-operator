@@ -36,3 +36,16 @@ profiles:
       - name: zookeeper
         remoteChart: bitnami/zookeeper
         upgradeOnChange: true
+- name: postgresql
+  patches:
+    - op: remove
+      path: /deploy/kubectl
+  deploy:
+    helm:
+      releases:
+      - name: "postgresql"
+        remoteChart: "bitnami/postgresql"
+        upgradeOnChange: true
+        setValues:
+          postgresqlPassword: "psql"
+          postgresqlDatabase: druiddb

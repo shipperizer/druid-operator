@@ -33,6 +33,7 @@ spec:
   jvm.options: |-
     -server
     -XX:MaxDirectMemorySize=10240g
+    -XX:+ExitOnOutOfMemoryError
     -Duser.timezone=UTC
     -Dfile.encoding=UTF-8
     -Dlog4j.debug
@@ -78,6 +79,10 @@ spec:
     value: "eu-west-1"      
   common.runtime.properties: |
 
+    # HTTP server threads
+    druid.broker.http.numConnections=10
+    druid.server.http.numThreads=10
+
     # log properties
     druid.startup.logging.logProperties=true
 
@@ -98,7 +103,7 @@ spec:
     # Deep Storage
     #
     druid.storage.bucket=druid
-    druid.storage.baseKey=druid/segments
+    druid.storage.baseKey=segments
     druid.storage.type=s3
     druid.storage.archiveBucket=
     druid.storage.archiveBaseKey=
@@ -108,21 +113,20 @@ spec:
     druid.s3.secretKey=0
     druid.s3.protocol=http
     druid.s3.endpoint.url=http://localstack.default.svc.cluster.local:4566
-    druid.s3.enablePathStyleAccess="true"
-    druid.storage.sse.type=
+    druid.s3.enablePathStyleAccess=true
     
     #
     # Metadata
     #
-    druid.metadata.storage.type=derby
-    druid.metadata.storage.connector.connectURI=jdbc:derby://localhost:1527/druid/data/derbydb/metadata.db;create=true
-    druid.metadata.storage.connector.host=localhost
-    druid.metadata.storage.connector.port=1527
+    # druid.metadata.storage.type=derby
+    # druid.metadata.storage.connector.connectURI=jdbc:derby://localhost:1527/druid/data/derbydb/metadata.db;create=true
+    # druid.metadata.storage.connector.host=localhost
+    # druid.metadata.storage.connector.port=1527
     druid.metadata.storage.connector.createTables=true
-    # druid.metadata.storage.type=postgresql
-    # druid.metadata.storage.connector.connectURI=jdbc:postgresql://rdsaddr.us-west-2.rds.amazonaws.com:5432/druiddb
-    # druid.metadata.storage.connector.user=iamuser
-    # druid.metadata.storage.connector.password=changeme
+    druid.metadata.storage.type=postgresql
+    druid.metadata.storage.connector.connectURI=jdbc:postgresql://postgresql.default.svc.cluster.local:5432/druiddb
+    druid.metadata.storage.connector.user=postgres
+    druid.metadata.storage.connector.password=psql
     
     # 
     # Emitters
@@ -137,8 +141,8 @@ spec:
     # druid.extensions.searchCurrentClassloader=false 
     # load so extensions may depend on conflicting versions.
     # druid.extensions.directory=/opt/druid/extensions/
-    # druid.extensions.loadList=["druid-kafka-indexing-service", "druid-s3-extensions", "druid-kinesis-indexing-service", "druid–kubernetes-extensions", "prometheus-emitter"] 
-    druid.extensions.loadList=["druid-kafka-indexing-service","druid-s3-extensions","druid-kubernetes-extensions"]
+    # druid.extensions.loadList=["druid-kafka-indexing-service","druid-s3-extensions"]
+    druid.extensions.loadList=["druid-kafka-indexing-service","druid-s3-extensions","druid-kubernetes-extensions","postgresql-metadata-storage"]
 
     #
     # Service discovery
@@ -146,8 +150,9 @@ spec:
     druid.selectors.indexing.serviceName=druid/overlord
     druid.selectors.coordinator.serviceName=druid/coordinator
     druid.lookup.enableLookupSyncOnStartup=false
-    druid.indexer.logs.type=file
-    druid.indexer.logs.directory=/druid/data/indexing-logs
+    druid.indexer.logs.type=s3
+    druid.indexer.logs.s3Bucket=druid
+    druid.indexer.logs.s3Prefix=indexing-logs
   metricDimensions.json: |-
     {
       "query/time" : { "dimensions" : ["dataSource", "type"], "type" : "timer"},
@@ -323,13 +328,11 @@ spec:
       replicas: 1
       runtime.properties: |
         druid.service=druid/broker
-        # HTTP server threads
-        druid.broker.http.numConnections=5
-        druid.server.http.numThreads=10
+
         # Processing threads and buffers
         druid.processing.buffer.sizeBytes=128MiB
         druid.processing.numMergeBuffers=1
-        druid.processing.numThreads=5
+        druid.processing.numThreads=1
         druid.sql.enable=true
       extra.jvm.options: |-
         -Xmx2G
@@ -372,10 +375,8 @@ spec:
           name: historical-volume
       runtime.properties: |
         druid.service=druid/historical
-        druid.server.http.numThreads=5
         druid.processing.buffer.sizeBytes=512MiB
         druid.processing.numMergeBuffers=1
-        druid.processing.numThreads=5
 
         # Segment storage
         druid.segmentCache.locations=[{"path":"var/druid/segments","maxSize":10737418240}]
@@ -452,11 +453,11 @@ spec:
       replicas: 1
       resources:
         limits:
-          cpu: "2"
-          memory: 5Gi
+          cpu: 1000m
+          memory: 2Gi
         requests:
-          cpu: "2"
-          memory: 5Gi
+          cpu: 25m
+          memory: 256Mi
       livenessProbe:
           initialDelaySeconds: 30
           httpGet:
@@ -473,10 +474,15 @@ spec:
         druid.indexer.task.baseTaskDir=/druid/data/baseTaskDir
         druid.server.http.numThreads=10
         # Processing threads and buffers on Peons
-        druid.indexer.runner.javaOpts=-server -XX:MaxDirectMemorySize=10240g -Djava.io.tmpdir=/opt/druid/var/tmp -Daws.region=eu-west-1 -Duser.timezone=UTC -Dfile.encoding=UTF-8 -Dlog4j.debug -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationStoppedTime -XX:+PrintGCApplicationConcurrentTime -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=50 -XX:GCLogFileSize=10m -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:+UseG1GC -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager -Xloggc:/druid/data/logs/peon.gc.%t.%p.log -XX:HeapDumpPath=/druid/data/logs/peon.%t.%p.hprof -Xms512M -Xmx2G
-        druid.indexer.fork.property.druid.processing.numThreads=1
+        # 1 not working
+        # druid.indexer.runner.javaOpts=-server -XX:MaxDirectMemorySize=10240g -Djava.io.tmpdir=/opt/druid/var/tmp -Daws.region=eu-west-1 -Duser.timezone=UTC -Dfile.encoding=UTF-8 -Dlog4j.debug -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationStoppedTime -XX:+PrintGCApplicationConcurrentTime -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=50 -XX:GCLogFileSize=10m -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:+UseG1GC -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager -Xloggc:/druid/data/logs/peon.gc.%t.%p.log -XX:HeapDumpPath=/druid/data/logs/peon.%t.%p.hprof -Xms512M -Xmx2G
+        # 2 not enough drect memory
+        # druid.indexer.runner.javaOpts=-server -Xms500m -Xmx500m -XX:MaxDirectMemorySize=500m -Duser.timezone=UTC -Dfile.encoding=UTF-8 -XX:+ExitOnOutOfMemoryError -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager -Dlog4j.debug
+        druid.indexer.runner.javaOpts=-server -Xms1024m -Xmx1024m -XX:MaxDirectMemorySize=868m -Duser.timezone=UTC -Dfile.encoding=UTF-8 -XX:+ExitOnOutOfMemoryError -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager -Dlog4j.debug
+
+        druid.indexer.fork.property.druid.processing.numThreads=10
         druid.indexer.fork.property.druid.processing.buffer.sizeBytes=256MiB
-        druid.indexer.fork.property.druid.processing.numMergeBuffers=1
+        druid.indexer.fork.property.druid.processing.numMergeBuffers=10
       services:
       - spec:
           clusterIP: None
